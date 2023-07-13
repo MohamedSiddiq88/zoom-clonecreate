@@ -1,38 +1,79 @@
-.App {
-  text-align: center;
-}
-
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+/* In your CSS styles */
+.remote-video-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
   display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+  align-items: center;
+  background-color: #f0f0f0; /* A background color to see the container's boundary */
 }
 
-.App-link {
-  color: #61dafb;
+.remote-video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* This ensures the video fills the container */
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* chat */
+.chat-message.sent {
+  /* background-color: #00FFFF; */
+  /* color: whitesmoke; */
+  border: 0.1rem solid green ;
+  width: fit-content;
+  margin: 0.5rem;
+  padding: 1rem;
+  border-radius:0.5rem;
+  border-top-left-radius: 0;
+  margin-right: auto;
+}
+
+.chat-message.received {
+  /* background-color: #36454F; */
+  /* color: whitesmoke; */
+  border: 0.1rem solid skyblue ;
+  width: fit-content;
+  margin: 0.5rem;
+  padding: 1rem;
+  border-radius:0.5rem;
+  border-bottom-right-radius: 0;
+  margin-left: auto;
+
+}
+
+.send-btn{
+  /* border-top-left-radius: 0;
+  border-bottom-left-radius: 0; */
+  margin: 0.2rem;
+  margin-left: auto;
+}
+
+.form-input{
+  /* border-top-right-radius: 0;
+  border-bottom-right-radius: 0; */
+  border-style: none;
+  border-radius: 5px; 
+  margin-left: 0.3rem;
+  width: 100%;
+  height: auto;
+}
+
+.form-input:focus{
+  outline-style: none;
+  
+}
+
+.chat-input{
+  border: 0.1rem solid gray;
+  border-radius: 5px;
+  height: fit-content;
+}
+
+
+
+/* Room */
+.video-container{
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
 }
