@@ -4,7 +4,7 @@ import Peer from 'peerjs';
 import io from 'socket.io-client';
 import Chat from './Chat';
 
-const socket = io('http://localhost:3001/');
+const socket = io('https://zoom-clone-server-sigma.vercel.app/');
 
 function Room() {
   const { roomId } = useParams();
