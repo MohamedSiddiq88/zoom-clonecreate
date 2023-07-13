@@ -14,7 +14,7 @@ function App() {
     <>
     <Routes>
       <Route path="/" element={<RoomJoin />} />
-      <Route path="/room/:roomId" element={<Room />} />
+      <Route path="/room/:roomId/:userId" element={<Room />} />
       <Route path="/room/:roomId/chat" element={<Chat />} />
       <Route path="/room/:roomId/share" element={<ScreenSharing />} />
 

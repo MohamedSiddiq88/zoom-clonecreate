@@ -2,12 +2,15 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import io from 'socket.io-client';
+import Peer from 'peerjs';
 
-const socket = io('https://zoom-clone-server-sigma.vercel.app/');
+const socket = io('https://zoom-server-q16z.onrender.com/');
+const peer = new Peer(); // Create a new Peer instance
 
 function RoomJoin() {
   const navigate = useNavigate();
   const [roomId, setRoomId] = useState('');
+  const [userId, setUserId] = useState('');
 
   const generateUniqueId = () => {
     const uniqueId = uuidv4();
@@ -15,11 +18,16 @@ function RoomJoin() {
   };
 
   const joinRoom = () => {
-    if (roomId) {
-      socket.emit('join-conference', roomId, uuidv4());
-      navigate(`/room/${roomId}`); // Navigate to the specified room ID
+    if (roomId && userId) {
+      socket.emit('join-conference', roomId, userId);
+      navigate(`/room/${roomId}/${userId}`);
+ // Navigate to the specified room ID
     }
   };
+
+  peer.on('open', (id) => {
+    setUserId(id); // Set the generated Peer ID as the user ID
+  });
 
   return (
     <div className="container mt-5 bg-dark text-light">
@@ -48,6 +56,7 @@ function RoomJoin() {
                   Join Room
                 </button>
               </div>
+              <p className="text-center mt-3">Your User ID: {userId}</p>
             </div>
           </div>
         </div>
