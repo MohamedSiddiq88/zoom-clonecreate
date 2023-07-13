@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import io from 'socket.io-client';
 
-const socket = io('http://localhost:3001/');
+const socket = io('https://zoom-clone-server-sigma.vercel.app/');
 
 function RoomJoin() {
   const navigate = useNavigate();
