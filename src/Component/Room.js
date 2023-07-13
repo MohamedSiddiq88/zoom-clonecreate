@@ -183,7 +183,7 @@ const startScreenSharing = () => {
   return (
     <div className='container-fluid'>
 	<div className='row'>
-		<div className='col-8'>
+		<div className='col-lg-8'>
 			<h2>Current room ID is {roomId}</h2>
       <h3>Connected Users: {peerId}</h3>
      
@@ -220,7 +220,7 @@ const startScreenSharing = () => {
       </div>
 		</div>
 
-		<div className='col-4'>
+		<div className='col-lg-4'>
 			 <Chat socket={socket} roomId={roomId} peerId={peerId} />
 		</div>
 	</div>
