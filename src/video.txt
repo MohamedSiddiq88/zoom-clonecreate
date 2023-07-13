@@ -1,0 +1,148 @@
+// Client-side code
+import React, { useState, useEffect, useRef } from "react";
+import io from "socket.io-client";
+
+const socket = io("http://localhost:5050");
+
+
+function App() {
+  const [localStream, setLocalStream] = useState(null);
+  const [connectedUsersCount, setConnectedUsersCount] = useState(0);
+  const [remoteStreams, setRemoteStreams] = useState(new Map()); // Store remote streams with socket id as the key
+  const videoRef = useRef();
+
+  useEffect(() => {
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
+      .then((stream) => {
+        setLocalStream(stream);
+        videoRef.current.srcObject = stream;
+        socket.emit("joinMeeting");
+      })
+      .catch((error) =>
+        console.error("Error accessing media devices:", error)
+      );
+
+    socket.on("connectedUsersCount", (count) => {
+      setConnectedUsersCount(count);
+    });
+
+    socket.on("newStream", (socketId) => {
+      // Create a new video element to display the remote stream
+      const newVideoElement = document.createElement("video");
+      newVideoElement.autoplay = true;
+      newVideoElement.muted = true; // Mute the remote stream to avoid echo
+      newVideoElement.style.width = "300px";
+      newVideoElement.style.height = "200px";
+      newVideoElement.setAttribute("data-socket", socketId); // Set socket id as a data attribute
+
+      // Add the new video element to the DOM
+      document.body.appendChild(newVideoElement);
+
+      // Get the remote stream and add it to the remoteStreams state
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+          newVideoElement.srcObject = stream;
+          setRemoteStreams((prev) => new Map(prev).set(socketId, stream));
+        })
+        .catch((error) =>
+          console.error("Error accessing remote media devices:", error)
+        );
+    });
+
+    socket.on("removeStream", (socketId) => {
+      // Remove the video element and the remote stream from the state
+      const videoElementToRemove = document.querySelector(
+        `video[data-socket="${socketId}"]`
+      );
+      if (videoElementToRemove) {
+        videoElementToRemove.srcObject = null;
+        videoElementToRemove.remove();
+      }
+      setRemoteStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(socketId);
+        return newMap;
+      });
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  return (
+    <div>
+      <h1>Zoom Clone</h1>
+      <div>
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          style={{ width: "300px", height: "200px" }}
+        />
+      </div>
+      <div>Connected Users: {connectedUsersCount}</div>
+    </div>
+  );
+}
+
+export default App;
+
+
+// Server-side code
+const express = require("express");
+const http = require("http");
+const socketIO = require("socket.io");
+const cors = require("cors");
+
+const app = express();
+const server = http.createServer(app);
+
+// Configure CORS options for Socket.IO
+const io = socketIO(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+const PORT = 5050;
+let connectedUsersCount = 0;
+let localStream = null;
+
+app.use(cors()); // Enable CORS for all routes
+
+const activeStreams = new Set();
+
+io.on("connection", (socket) => {
+  connectedUsersCount++;
+  io.emit("connectedUsersCount", connectedUsersCount);
+
+  socket.on("joinMeeting", () => {
+    // Send existing streams to the newly joined user
+    for (const stream of activeStreams) {
+      socket.emit("newStream", stream);
+    }
+    // Add the new user's stream to activeStreams set
+    activeStreams.add(socket.id);
+
+    // Broadcast the new stream to other users
+    socket.broadcast.emit("newStream", socket.id);
+  });
+
+  socket.on("disconnect", () => {
+    connectedUsersCount--;
+    io.emit("connectedUsersCount", connectedUsersCount);
+
+    // Remove the disconnected user's stream from activeStreams set
+    activeStreams.delete(socket.id);
+    // Notify other users to remove the disconnected user's stream
+    socket.broadcast.emit("removeStream", socket.id);
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});

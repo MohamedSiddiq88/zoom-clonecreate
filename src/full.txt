@@ -1,0 +1,196 @@
+//client
+import React, { useEffect, useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import Peer from 'peerjs';
+import io from 'socket.io-client';
+
+const socket = io('http://localhost:3001/');
+
+function App() {
+  const [roomId, setRoomId] = useState('');
+  const [peerId, setPeerId] = useState('');
+  const [remotePeerIdValue, setRemotePeerIdValue] = useState('');
+  const remoteVideoRef = useRef(null);
+  const currentUserVideoRef = useRef(null);
+  const peerInstance = useRef(null);
+  const [connectedPeers, setConnectedPeers] = useState([]);
+  const remoteVideoRefs = useRef({});
+  const videoGrid = useRef(null);
+
+  useEffect(() => {
+    const initializePeer = async () => {
+      const peer = new Peer();
+
+      peer.on('open', (id) => {
+        setPeerId(id);
+        socket.emit('join-conference', id); // Inform the server that the user has joined the conference
+      });
+
+      peer.on('call', (call) => {
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          .then((mediaStream) => {
+            const remotePeerId = call.peer;
+            remoteVideoRefs.current[remotePeerId] = remoteVideoRef.current;
+
+            setConnectedPeers((prevConnectedPeers) => [...prevConnectedPeers, remotePeerId]);
+
+            currentUserVideoRef.current.srcObject = mediaStream;
+            currentUserVideoRef.current.play();
+            call.answer(mediaStream);
+            call.on('stream', (remoteStream) => {
+              remoteVideoRefs.current[remotePeerId].srcObject = remoteStream;
+              remoteVideoRefs.current[remotePeerId].play();
+            });
+          })
+          .catch((error) => {
+            console.error('Error accessing media devices:', error);
+            alert('Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.');
+          });
+      });
+
+      peerInstance.current = peer;
+    };
+
+    initializePeer();
+  }, []);
+
+  useEffect(() => {
+    // Generate a unique room ID when the user opens the app
+    const generatedRoomId = uuidv4();
+    setRoomId(generatedRoomId);
+
+    // Emit join-conference event to the server with the generated room ID and user ID
+    socket.emit('join-conference', generatedRoomId, peerId);
+  
+    const handleNewUser = (userId) => {
+      // Call the new user when they join the conference
+      call(userId);
+    };
+  
+    const handleUserDisconnected = (userId) => {
+      // Handle user disconnections
+      if (remoteVideoRefs.current[userId]) {
+        remoteVideoRefs.current[userId].srcObject = null;
+        remoteVideoRefs.current[userId].remove();
+        delete remoteVideoRefs.current[userId];
+        setConnectedPeers((prevConnectedPeers) =>
+          prevConnectedPeers.filter((peer) => peer !== userId)
+        );
+      }
+    };
+  
+    socket.on('new-user', handleNewUser);
+    socket.on('user-disconnected', handleUserDisconnected);
+  
+    return () => {
+      socket.off('new-user', handleNewUser);
+      socket.off('user-disconnected', handleUserDisconnected);
+    };
+  }, []);
+  
+  const joinRoom = () => {
+    if (roomId) {
+      socket.emit('join-conference', roomId, peerId);
+    }
+  };
+
+  const call = (remotePeerId) => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then((mediaStream) => {
+        const call = peerInstance.current.call(remotePeerId, mediaStream);
+        remoteVideoRefs.current[remotePeerId] = remoteVideoRef.current;
+
+        setConnectedPeers((prevConnectedPeers) => [...prevConnectedPeers, remotePeerId]);
+
+        currentUserVideoRef.current.srcObject = mediaStream;
+        currentUserVideoRef.current.play();
+
+        call.on('stream', (remoteStream) => {
+          remoteVideoRefs.current[remotePeerId].srcObject = remoteStream;
+          remoteVideoRefs.current[remotePeerId].play();
+        });
+      })
+      .catch((error) => {
+        console.error('Error accessing media devices:', error);
+        alert('Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.');
+      });
+  };
+
+  return (
+    <div className="App">
+      <h2>Conference room ID is {roomId}</h2>
+      <div>
+        <input
+          type="text"
+          value={roomId}
+          onChange={(e) => setRoomId(e.target.value)}
+          placeholder="Enter Room ID"
+        />
+        <button onClick={joinRoom}>Join Room</button>
+      </div>
+      <h1>Current user ID is {peerId}</h1>
+      {/* <input
+        type="text"
+        value={remotePeerIdValue}
+        onChange={(e) => setRemotePeerIdValue(e.target.value)}
+      />
+      <button onClick={() => call(remotePeerIdValue)}>Call</button> */}
+      <div>
+        <video
+          ref={currentUserVideoRef}
+          style={{ width: '300px', height: '200px' }}
+        />
+      </div>
+      <div ref={videoGrid}>
+        {connectedPeers.map((peer) => (
+          <video
+            key={peer}
+            ref={(ref) => (remoteVideoRefs.current[peer] = ref)}
+            style={{ width: '300px', height: '200px' }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default App;
+
+//server
+
+//server
+const app = require('express')();
+const cors = require('cors');
+const http = require('http').Server(app);
+const io = require('socket.io')(http, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
+
+app.use(cors()); // Enable CORS for all routes
+
+io.on('connection', (socket) => {
+  console.log('User connected');
+
+  socket.on('join-conference', (roomId, userId) => {
+    console.log(`User joined conference: Room ${roomId}, User ${userId}`);
+    socket.join(roomId); // Join the specified room
+    socket.to(roomId).emit('new-user', userId); // Notify all other users in the room about the new user
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected');
+    // Get the room ID of the disconnected user
+    const room = Object.keys(socket.rooms).find((room) => room !== socket.id);
+    if (room) {
+      socket.to(room).emit('user-disconnected', socket.id); // Notify all other users in the room about the disconnected user
+    }
+  });
+});
+
+const port = 3001; // Choose any available port number
+http.listen(port, () => {
+  console.log(`Signaling server is running on port ${port}`);
+});

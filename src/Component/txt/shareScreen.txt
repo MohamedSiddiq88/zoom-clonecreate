@@ -1,0 +1,267 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import Peer from 'peerjs';
+import io from 'socket.io-client';
+import Chat from './Chat';
+
+const socket = io('http://localhost:3001/');
+
+function Room() {
+  const { roomId } = useParams();
+  const [peerId, setPeerId] = useState('');
+  const remoteVideoRefs = useRef({});
+  const currentUserVideoRef = useRef(null);
+  const [connectedUsers, setConnectedUsers] = useState([]);
+  const peerInstance = useRef(null);
+  const screenStreamRef = useRef(null);
+
+  useEffect(() => {
+    const initializePeer = async () => {
+      const peer = new Peer();
+
+      peer.on('open', (id) => {
+        setPeerId(id);
+        socket.emit('join-conference', roomId, id);
+        setConnectedUsers((prevConnectedUsers) => [...prevConnectedUsers, id]); // Add current user ID to the array
+      });
+
+      peer.on('call', (call) => {
+        navigator.mediaDevices
+          .getUserMedia({ video: true, audio: true })
+          .then((mediaStream) => {
+            const remotePeerId = call.peer;
+            remoteVideoRefs.current[remotePeerId] =
+              remoteVideoRefs.current[remotePeerId] || React.createRef();
+
+            if (!connectedUsers.includes(remotePeerId)) {
+              setConnectedUsers((prevConnectedUsers) => [...prevConnectedUsers, remotePeerId]);
+            }
+
+            currentUserVideoRef.current.srcObject = mediaStream;
+            playVideo(currentUserVideoRef.current);
+
+            call.answer(mediaStream);
+            call.on('stream', (remoteStream) => {
+              remoteVideoRefs.current[remotePeerId].current.srcObject = remoteStream;
+              playVideo(remoteVideoRefs.current[remotePeerId].current);
+            });
+          })
+          .catch((error) => {
+            console.error('Error accessing media devices:', error);
+            alert(
+              'Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.'
+            );
+          });
+      });
+
+      peerInstance.current = peer;
+    };
+
+    initializePeer();
+  }, [roomId]);
+
+  const playVideo = (videoElement) => {
+    videoElement
+      .play()
+      .then(() => {
+        console.log('Video playback started');
+      })
+      .catch((error) => {
+        console.error('Error starting video playback:', error);
+      });
+  };
+
+  const call = (remotePeerId, stream) => {
+    const call = peerInstance.current.call(remotePeerId, stream);
+    remoteVideoRefs.current[remotePeerId] =
+      remoteVideoRefs.current[remotePeerId] || React.createRef();
+
+    if (!connectedUsers.includes(remotePeerId)) {
+      setConnectedUsers((prevConnectedUsers) => [...prevConnectedUsers, remotePeerId]);
+    }
+
+    currentUserVideoRef.current.srcObject = stream;
+    playVideo(currentUserVideoRef.current);
+
+    call.on('stream', (remoteStream) => {
+      remoteVideoRefs.current[remotePeerId].current.srcObject = remoteStream;
+      playVideo(remoteVideoRefs.current[remotePeerId].current);
+    });
+  };
+
+  const shareScreen = () => {
+    navigator.mediaDevices
+      .getDisplayMedia({ video: true, audio: true })
+      .then((screenStream) => {
+        screenStreamRef.current = screenStream;
+        const videoTracks = screenStream.getVideoTracks();
+        const audioTracks = screenStream.getAudioTracks();
+
+        videoTracks[0].addEventListener('ended', () => {
+          stopSharingScreen();
+        });
+
+        // Replace the current stream with the screen sharing stream
+        currentUserVideoRef.current.srcObject = screenStream;
+        playVideo(currentUserVideoRef.current);
+
+        // Call each connected user with the screen sharing stream
+        connectedUsers.forEach((user) => {
+          if (user !== peerId) {
+            call(user, screenStream);
+          }
+        });
+
+        // Add screen sharing track to the current user's media stream
+        const currentUserMediaStream = currentUserVideoRef.current.srcObject;
+        const mediaStreamWithScreen = new MediaStream([
+          ...currentUserMediaStream.getTracks(),
+          ...screenStream.getTracks(),
+        ]);
+
+        // Update the peer connection with the new media stream
+        peerInstance.current.replaceTrack(
+          currentUserMediaStream.getVideoTracks()[0],
+          mediaStreamWithScreen.getVideoTracks()[0],
+          currentUserMediaStream
+        );
+        peerInstance.current.replaceTrack(
+          currentUserMediaStream.getAudioTracks()[0],
+          mediaStreamWithScreen.getAudioTracks()[0],
+          currentUserMediaStream
+        );
+      })
+      .catch((error) => {
+        console.error('Error accessing media devices:', error);
+        alert(
+          'Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.'
+        );
+      });
+  };
+
+  const stopSharingScreen = () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+
+      // Replace the current stream with the user's camera stream
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((mediaStream) => {
+          currentUserVideoRef.current.srcObject = mediaStream;
+          playVideo(currentUserVideoRef.current);
+
+          // Call each connected user with the user's camera stream
+          connectedUsers.forEach((user) => {
+            if (user !== peerId) {
+              call(user, mediaStream);
+            }
+          });
+
+          // Update the peer connection with the new media stream
+          peerInstance.current.replaceTrack(
+            currentUserVideoRef.current.srcObject.getVideoTracks()[0],
+            mediaStream.getVideoTracks()[0],
+            currentUserVideoRef.current.srcObject
+          );
+          peerInstance.current.replaceTrack(
+            currentUserVideoRef.current.srcObject.getAudioTracks()[0],
+            mediaStream.getAudioTracks()[0],
+            currentUserVideoRef.current.srcObject
+          );
+        })
+        .catch((error) => {
+          console.error('Error accessing media devices:', error);
+          alert(
+            'Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.'
+          );
+        });
+    }
+  };
+
+  useEffect(() => {
+    const handleNewUser = (userId) => {
+      if (userId !== peerId) {
+        if (!connectedUsers.includes(userId)) {
+          if (screenStreamRef.current) {
+            call(userId, screenStreamRef.current);
+          } else {
+            navigator.mediaDevices
+              .getUserMedia({ video: true, audio: true })
+              .then((mediaStream) => {
+                call(userId, mediaStream);
+              })
+              .catch((error) => {
+                console.error('Error accessing media devices:', error);
+                alert(
+                  'Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.'
+                );
+              });
+          }
+        }
+      }
+    };
+
+    const handleUserDisconnected = (userId) => {
+      if (remoteVideoRefs.current[userId]) {
+        delete remoteVideoRefs.current[userId];
+      }
+
+      setConnectedUsers((prevConnectedUsers) =>
+        prevConnectedUsers.filter((user) => user !== userId)
+      );
+    };
+
+    socket.on('new-user', handleNewUser);
+    socket.on('user-disconnected', handleUserDisconnected);
+
+    return () => {
+      socket.off('new-user', handleNewUser);
+      socket.off('user-disconnected', handleUserDisconnected);
+    };
+  }, [connectedUsers, peerId]);
+
+  return (
+    <div className="container-fluid">
+      <div className="row">
+        <div className="col-8">
+          <h2>Current room ID is {roomId}</h2>
+          <h3>Connected Users: {peerId}</h3>
+          <h3>Connected Users:</h3>
+          <ul>
+            {connectedUsers.map((user) => (
+              <li key={user}>{user}</li>
+            ))}
+          </ul>
+          <div className="video-container">
+            <video
+              ref={currentUserVideoRef}
+              style={{ width: '300px', height: '200px' }}
+              autoPlay
+              muted
+            />
+            {connectedUsers.map(
+              (user) =>
+                user !== peerId && (
+                  <video
+                    key={user}
+                    ref={remoteVideoRefs.current[user]}
+                    style={{ width: '300px', height: '200px' }}
+                    autoPlay
+                    onCanPlay={() => playVideo(remoteVideoRefs.current[user].current)}
+                  />
+                )
+            )}
+          </div>
+        </div>
+        <div className="col-4">
+          <Chat socket={socket} roomId={roomId} peerId={peerId} />
+          <button onClick={shareScreen}>Share Screen</button>
+          <button onClick={stopSharingScreen}>Stop Sharing Screen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default Room;

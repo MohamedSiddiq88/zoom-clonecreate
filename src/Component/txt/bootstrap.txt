@@ -1,0 +1,161 @@
+//original
+import React, { useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import Peer from 'peerjs';
+import io from 'socket.io-client';
+import Chat from './Chat';
+import ScreenSharing from './ScreenSharing';
+
+const socket = io('http://localhost:3001/');
+
+function Room() {
+  const { roomId } = useParams();
+  const [peerId, setPeerId] = useState('');
+  const remoteVideoRefs = useRef({});
+  const currentUserVideoRef = useRef(null);
+  const [connectedUsers, setConnectedUsers] = useState([]);
+  const peerInstance = useRef(null);
+
+  useEffect(() => {
+    const initializePeer = async () => {
+      const peer = new Peer();
+
+      peer.on('open', (id) => {
+        setPeerId(id);
+        socket.emit('join-conference', roomId, id);
+        setConnectedUsers((prevConnectedUsers) => [...prevConnectedUsers, id]); // Add current user ID to the array
+      });
+
+      peer.on('call', (call) => {
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          .then((mediaStream) => {
+            const remotePeerId = call.peer;
+            remoteVideoRefs.current[remotePeerId] = remoteVideoRefs.current[remotePeerId] || React.createRef();
+
+            if (!connectedUsers.includes(remotePeerId)) {
+              setConnectedUsers((prevConnectedUsers) => [...prevConnectedUsers, remotePeerId]);
+            }
+
+            currentUserVideoRef.current.srcObject = mediaStream;
+            playVideo(currentUserVideoRef.current);
+
+            call.answer(mediaStream);
+            call.on('stream', (remoteStream) => {
+              remoteVideoRefs.current[remotePeerId].current.srcObject = remoteStream;
+              playVideo(remoteVideoRefs.current[remotePeerId].current);
+            });
+          })
+          .catch((error) => {
+            console.error('Error accessing media devices:', error);
+            alert('Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.');
+          });
+      });
+
+      peerInstance.current = peer;
+    };
+
+    initializePeer();
+  }, [roomId]);
+
+  const playVideo = (videoElement) => {
+    videoElement.play()
+      .then(() => {
+        console.log('Video playback started');
+      })
+      .catch((error) => {
+        console.error('Error starting video playback:', error);
+      });
+  };
+
+  const call = (remotePeerId) => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then((mediaStream) => {
+        const call = peerInstance.current.call(remotePeerId, mediaStream);
+        remoteVideoRefs.current[remotePeerId] = remoteVideoRefs.current[remotePeerId] || React.createRef();
+
+        if (!connectedUsers.includes(remotePeerId)) {
+          setConnectedUsers((prevConnectedUsers) => [...prevConnectedUsers, remotePeerId]);
+        }
+
+        currentUserVideoRef.current.srcObject = mediaStream;
+        playVideo(currentUserVideoRef.current);
+
+        call.on('stream', (remoteStream) => {
+          remoteVideoRefs.current[remotePeerId].current.srcObject = remoteStream;
+          playVideo(remoteVideoRefs.current[remotePeerId].current);
+        });
+      })
+      .catch((error) => {
+        console.error('Error accessing media devices:', error);
+        alert('Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.');
+      });
+  };
+
+  useEffect(() => {
+    const handleNewUser = (userId) => {
+      if (userId !== peerId) {
+        if (!connectedUsers.includes(userId)) {
+          call(userId);
+        }
+      }
+    };
+
+    const handleUserDisconnected = (userId) => {
+      if (remoteVideoRefs.current[userId]) {
+        delete remoteVideoRefs.current[userId];
+      }
+
+      setConnectedUsers((prevConnectedUsers) => prevConnectedUsers.filter((user) => user !== userId));
+    };
+
+    socket.on('new-user', handleNewUser);
+    socket.on('user-disconnected', handleUserDisconnected);
+
+    return () => {
+      socket.off('new-user', handleNewUser);
+      socket.off('user-disconnected', handleUserDisconnected);
+    };
+  }, [connectedUsers, peerId]);
+
+  return (
+    <div className='container-fluid'>
+      <div className='row'>
+        <div className='col-8'>
+        <h2>Current room ID is {roomId}</h2>
+      <h3>Connected Users: {peerId}</h3>
+      <ScreenSharing peerInstance={peerInstance} />
+      
+
+      <h3>Connected Users:</h3>
+      <ul>
+        {connectedUsers.map((user) => (
+          <li key={user}>{user}</li>
+        ))}
+      </ul>
+      <div className='video-container'>
+        <video ref={currentUserVideoRef} style={{ width: '300px', height: '200px' }} autoPlay muted />
+      
+      
+        {connectedUsers.map((user) => user !== peerId && (
+          <video
+            
+            key={user}
+            ref={remoteVideoRefs.current[user]}
+            style={{ width: '300px', height: '200px' }}
+            autoPlay
+            onCanPlay={() => playVideo(remoteVideoRefs.current[user].current)}
+          />
+        ))}
+      </div>
+        </div>
+        {/* Next */}
+        <div className='col-4'>
+        <Chat socket={socket} roomId={roomId} peerId={peerId} />
+        </div>
+      </div>
+      
+    </div>
+  );
+}
+
+export default Room;

@@ -1,0 +1,215 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { v4 as uuidv4 } from 'uuid';
+import Peer from 'peerjs';
+import io from 'socket.io-client';
+
+const socket = io('http://localhost:3001/');
+
+function Room() {
+  const { roomId } = useParams();
+  const [peerId, setPeerId] = useState('');
+  const [remotePeerIdValue, setRemotePeerIdValue] = useState('');
+  const remoteVideoRef = useRef(null);
+  const currentUserVideoRef = useRef(null);
+  const peerInstance = useRef(null);
+  const [connectedPeers, setConnectedPeers] = useState([]);
+  const remoteVideoRefs = useRef({});
+  const videoGrid = useRef(null);
+
+  useEffect(() => {
+    const initializePeer = async () => {
+      const peer = new Peer();
+
+      peer.on('open', (id) => {
+        setPeerId(id);
+        socket.emit('join-conference', roomId, id); // Inform the server that the user has joined the conference
+      });
+
+      peer.on('call', (call) => {
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          .then((mediaStream) => {
+            const remotePeerId = call.peer;
+            remoteVideoRefs.current[remotePeerId] = remoteVideoRef.current;
+
+            setConnectedPeers((prevConnectedPeers) => [...prevConnectedPeers, remotePeerId]);
+
+            currentUserVideoRef.current.srcObject = mediaStream;
+            currentUserVideoRef.current.play()
+              .catch((error) => {
+                console.error('Error playing current user video:', error);
+              });
+
+            call.answer(mediaStream);
+            call.on('stream', (remoteStream) => {
+              remoteVideoRefs.current[remotePeerId].srcObject = remoteStream;
+              remoteVideoRefs.current[remotePeerId].play()
+                .catch((error) => {
+                  console.error('Error playing remote peer video:', error);
+                });
+            });
+          })
+          .catch((error) => {
+            console.error('Error accessing media devices:', error);
+            alert('Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.');
+          });
+      });
+
+      peerInstance.current = peer;
+    };
+
+    initializePeer();
+  }, [roomId]);
+
+  const joinRoom = () => {
+    if (roomId) {
+      socket.emit('join-conference', roomId, peerId);
+    }
+  };
+
+  const call = (remotePeerId) => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then((mediaStream) => {
+        const call = peerInstance.current.call(remotePeerId, mediaStream);
+        remoteVideoRefs.current[remotePeerId] = remoteVideoRef.current;
+  
+        setConnectedPeers((prevConnectedPeers) => [...prevConnectedPeers, remotePeerId]);
+  
+        currentUserVideoRef.current.srcObject = mediaStream;
+        currentUserVideoRef.current.play()
+          .catch((error) => {
+            console.error('Error playing current user video:', error);
+          });
+  
+        call.on('stream', (remoteStream) => {
+          const remoteVideoElement = document.createElement('video');
+          remoteVideoElement.srcObject = remoteStream;
+          remoteVideoElement.play()
+            .then(() => {
+              remoteVideoRefs.current[remotePeerId].srcObject = remoteStream;
+              remoteVideoRefs.current[remotePeerId].play()
+                .catch((error) => {
+                  console.error('Error playing remote peer video:', error);
+                });
+            })
+            .catch((error) => {
+              console.error('Error playing remote peer video:', error);
+              remoteVideoElement.remove();
+            });
+        });
+      })
+      .catch((error) => {
+        console.error('Error accessing media devices:', error);
+        alert('Failed to access media devices. Please ensure you have a camera and microphone available and grant permission to access them.');
+      });
+  };
+  
+
+  useEffect(() => {
+    const handleNewUser = (userId) => {
+      // Call the new user when they join the conference
+      call(userId);
+    };
+
+    const handleUserDisconnected = (userId) => {
+      if (remoteVideoRefs.current[userId]) {
+        const videoElement = remoteVideoRefs.current[userId];
+        const stream = videoElement.srcObject;
+
+        // Stop the video playback
+        videoElement.pause();
+        videoElement.srcObject = null;
+
+        // Remove the video element from the DOM
+        videoElement.remove();
+
+        // Delete the reference from the remoteVideoRefs
+        delete remoteVideoRefs.current[userId];
+
+        // Remove the user from the connectedPeers state
+        setConnectedPeers((prevConnectedPeers) =>
+          prevConnectedPeers.filter((peer) => peer !== userId)
+        );
+
+        // Clean up the stream resources
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop());
+        }
+      }
+    };
+
+    socket.on('new-user', handleNewUser);
+    socket.on('user-disconnected', handleUserDisconnected);
+
+    return () => {
+      socket.off('new-user', handleNewUser);
+      socket.off('user-disconnected', handleUserDisconnected);
+    };
+  }, []);
+
+  return (
+    <div>
+      <h1>Current user ID is {peerId}</h1>
+      <h2>Current room ID is {roomId}</h2>
+      <div>
+        <video ref={currentUserVideoRef} style={{ width: '300px', height: '200px' }} />
+      </div>
+      <div ref={videoGrid}>
+        {connectedPeers.map((peer) => (
+          <video
+            key={peer}
+            ref={(ref) => (remoteVideoRefs.current[peer] = ref)}
+            style={{ width: '300px', height: '200px' }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default Room;
+
+//server
+//server (project one)
+const app = require('express')();
+const cors = require('cors');
+const http = require('http').Server(app);
+const io = require('socket.io')(http, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
+
+app.use(cors()); // Enable CORS for all routes
+
+io.on('connection', (socket) => {
+  console.log('User connected');
+
+  socket.on('join-conference', (roomId, userId) => {
+    console.log(`User joined conference: Room ${roomId}, User ${userId}`);
+    socket.join(roomId); // Join the specified room
+    socket.to(roomId).emit('new-user', userId); // Notify all other users in the room about the new user
+  });
+
+  socket.on('user-disconnected', (roomId, userId) => {
+    console.log(`User disconnected: Room ${roomId}, User ${userId}`);
+    socket.to(roomId).emit('user-disconnected', userId); // Notify all other users in the room about the disconnected user
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected');
+    const rooms = Object.keys(socket.rooms);
+    rooms.forEach((room) => {
+      if (room !== socket.id) {
+        socket.to(room).emit('user-disconnected', socket.id); // Notify all other users in the room about the disconnected user
+      }
+    });
+  });
+});
+
+const port = 3001; // Choose any available port number
+http.listen(port, () => {
+  console.log(`Signaling server is running on port ${port}`);
+});
+
